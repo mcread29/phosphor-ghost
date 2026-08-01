@@ -9,12 +9,34 @@
     flicker: 0.02,
     warp: 0.075,
     chromatic: 1.35,
+    glitchIntensity: 0.7,
+    glitchFrequency: 4,
   };
+
+  const settingsKey = "signal-os-crt-defaults";
+  const isDev = import.meta.env.DEV;
+
+  function loadSettings() {
+    if (!isDev) return { ...defaults };
+    try {
+      const saved = JSON.parse(localStorage.getItem(settingsKey) ?? "null") as Partial<typeof defaults> | null;
+      return saved ? { ...defaults, ...saved } : { ...defaults };
+    } catch {
+      return { ...defaults };
+    }
+  }
 
   let armed = $state(false);
   let channel = $state(4);
   let controlsOpen = $state(false);
-  let settings = $state({ ...defaults });
+  let saveLabel = $state("SAVE DEFAULT");
+  let settings = $state(loadSettings());
+
+  function saveSettings() {
+    localStorage.setItem(settingsKey, JSON.stringify(settings));
+    saveLabel = "SAVED";
+    window.setTimeout(() => (saveLabel = "SAVE DEFAULT"), 1200);
+  }
   const controls = [
     { key: "bloom", label: "Bloom", min: 0, max: 2, step: 0.01 },
     { key: "scanlineSize", label: "Line size", min: 2, max: 12, step: 0.25 },
@@ -23,6 +45,8 @@
     { key: "flicker", label: "Flicker", min: 0, max: 0.12, step: 0.002 },
     { key: "warp", label: "Screen warp", min: 0, max: 0.2, step: 0.0025 },
     { key: "chromatic", label: "RGB split", min: 0, max: 6, step: 0.05 },
+    { key: "glitchIntensity", label: "Glitch strength", min: 0, max: 2, step: 0.02 },
+    { key: "glitchFrequency", label: "Glitch interval", min: 0.5, max: 12, step: 0.1 },
   ] as const;
   const logs = [
     "Carrier handshake accepted",
@@ -65,13 +89,20 @@
       </article>
     </section>
     <footer><span>BUILD 4.12.88</span><span>WEBGL CRT PROTOCOL</span><span>© 2088 SIGNAL INDUSTRIES</span></footer>
+  </main>
+</CrtScreen>
 
+{#if isDev}
+  <div class="dev-overlay">
     <button class="tune-toggle" onclick={() => (controlsOpen = !controlsOpen)} aria-expanded={controlsOpen}>
       {controlsOpen ? "CLOSE" : "TUNE CRT"}
     </button>
     {#if controlsOpen}
       <aside class="tune-panel" aria-label="CRT post-processing controls">
-        <div class="tune-heading"><strong>POST PROCESSING</strong><button onclick={() => (settings = { ...defaults })}>RESET</button></div>
+        <div class="tune-heading">
+          <strong>POST PROCESSING</strong>
+          <div><button onclick={() => (settings = { ...defaults })}>RESET</button><button onclick={saveSettings}>{saveLabel}</button></div>
+        </div>
         {#each controls as control (control.key)}
           <label>
             <span>{control.label}<output>{settings[control.key].toFixed(control.step < 0.01 ? 3 : 2)}</output></span>
@@ -80,5 +111,5 @@
         {/each}
       </aside>
     {/if}
-  </main>
-</CrtScreen>
+  </div>
+{/if}

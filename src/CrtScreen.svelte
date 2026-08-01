@@ -10,6 +10,8 @@
     flicker?: number;
     warp?: number;
     chromatic?: number;
+    glitchIntensity?: number;
+    glitchFrequency?: number;
   };
 
   let {
@@ -21,6 +23,8 @@
     flicker = 0.02,
     warp = 0.075,
     chromatic = 1.35,
+    glitchIntensity = 0.7,
+    glitchFrequency = 4,
   }: Props = $props();
   let source: HTMLCanvasElement;
   let content: HTMLDivElement;
@@ -50,6 +54,8 @@ uniform float uScanlineSpeed;
 uniform float uFlicker;
 uniform float uWarp;
 uniform float uChromatic;
+uniform float uGlitchAmp;
+uniform float uGlitchSeed;
 vec2 curve(vec2 uv) {
   vec2 p = uv * 2. - 1.;
   float r2 = dot(p, p);
@@ -63,11 +69,22 @@ void main() {
   float mask = edge.x * edge.y;
   if (mask <= 0.) { fragColor = vec4(0., 0., 0., 1.); return; }
   vec2 px = 1. / uResolution;
-  float aberration = uChromatic * px.x;
+  vec2 sampleUv = uv;
+  if (uGlitchAmp > .001) {
+    float slice = floor(uv.y * 26.);
+    float sliceNoise = rand(vec2(slice, uGlitchSeed));
+    float tear = step(.72, sliceNoise);
+    float direction = rand(vec2(slice, uGlitchSeed + 17.)) * 2. - 1.;
+    sampleUv.x += tear * direction * uGlitchAmp * 34. * px.x;
+    vec2 block = floor(uv * vec2(11., 15.));
+    float corrupted = step(.9, rand(block + uGlitchSeed));
+    sampleUv += corrupted * (vec2(rand(block + 4.1), rand(block + 8.7)) - .5) * vec2(.05, .018) * uGlitchAmp;
+  }
+  float aberration = (uChromatic + uGlitchAmp * 5.) * px.x;
   vec3 base;
-  base.r = texture(uScreen, uv + vec2(aberration, 0.)).r;
-  base.g = texture(uScreen, uv).g;
-  base.b = texture(uScreen, uv - vec2(aberration, 0.)).b;
+  base.r = texture(uScreen, sampleUv + vec2(aberration, 0.)).r;
+  base.g = texture(uScreen, sampleUv).g;
+  base.b = texture(uScreen, sampleUv - vec2(aberration, 0.)).b;
   vec3 bloom = vec3(0.);
   bloom += texture(uScreen, uv + px * vec2(-5., 0.)).rgb;
   bloom += texture(uScreen, uv + px * vec2(5., 0.)).rgb;
@@ -83,9 +100,10 @@ void main() {
   float scanPhase = abs(fract((gl_FragCoord.y + uTime * uScanlineSpeed) / uScanlineSize) - .5);
   float scan = mix(1. - uScanlineDepth, 1., smoothstep(.12, .34, scanPhase));
   float grille = .94 + .06 * sin(uv.x * uResolution.x * 2.094);
-  float fastFlicker = 1. - uFlicker + uFlicker * sin(uTime * 43. + sin(uTime * 9.) * 1.5);
-  float randomFlicker = 1. - step(.985, rand(vec2(floor(uTime * 14.), .37))) * uFlicker * 2.25;
-  float flicker = fastFlicker * randomFlicker;
+  float flickerFrame = floor(uTime * 23.);
+  float randomFlicker = (rand(vec2(flickerFrame, 2.7)) * 2. - 1.) * uFlicker;
+  float dropout = step(.975, rand(vec2(floor(uTime * 11.), 8.3))) * uFlicker * 3.5;
+  float flicker = 1. + randomFlicker - dropout - uGlitchAmp * rand(vec2(flickerFrame, uGlitchSeed)) * .09;
   float vignette = pow(16. * uv.x * uv.y * (1. - uv.x) * (1. - uv.y), .16);
   color *= scan * grille * flicker * vignette * mask;
   color *= vec3(1.0, 1.035, 1.0);
@@ -150,6 +168,8 @@ void main() {
     const flickerLocation = gl.getUniformLocation(program, "uFlicker");
     const warpLocation = gl.getUniformLocation(program, "uWarp");
     const chromaticLocation = gl.getUniformLocation(program, "uChromatic");
+    const glitchAmpLocation = gl.getUniformLocation(program, "uGlitchAmp");
+    const glitchSeedLocation = gl.getUniformLocation(program, "uGlitchSeed");
     let dirty = true;
     let frame = 0;
     const resize = () => {
@@ -168,6 +188,10 @@ void main() {
       dirty = true;
     };
     const startedAt = performance.now();
+    let nextGlitchAt = 1.5 + Math.random() * 2;
+    let glitchStartedAt = -10;
+    let glitchDuration = 0.25;
+    let glitchSeed = Math.random() * 1000;
     const render = (now: number) => {
       if (dirty) {
         gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -184,6 +208,19 @@ void main() {
       gl.uniform1f(flickerLocation, flicker);
       gl.uniform1f(warpLocation, warp);
       gl.uniform1f(chromaticLocation, chromatic);
+      const elapsed = (now - startedAt) / 1000;
+      if (elapsed >= nextGlitchAt) {
+        glitchStartedAt = elapsed;
+        glitchDuration = 0.12 + Math.random() * 0.3;
+        glitchSeed = Math.random() * 1000;
+        nextGlitchAt = elapsed + Math.max(0.5, glitchFrequency) * (0.55 + Math.random() * 0.9);
+      }
+      const glitchProgress = (elapsed - glitchStartedAt) / glitchDuration;
+      const glitchEnvelope = glitchProgress >= 0 && glitchProgress < 1
+        ? (1 - glitchProgress) * (0.65 + Math.random() * 0.35)
+        : 0;
+      gl.uniform1f(glitchAmpLocation, glitchEnvelope * glitchIntensity);
+      gl.uniform1f(glitchSeedLocation, glitchSeed + Math.floor(elapsed * 24));
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       frame = requestAnimationFrame(render);
     };
@@ -207,7 +244,31 @@ void main() {
       }) ?? null;
     };
     let draggedRange: HTMLInputElement | null = null;
+    let selectionAnchor: { node: Node; offset: number } | null = null;
     let hovered: HTMLElement | null = null;
+    const caretAt = (event: PointerEvent) => {
+      const point = mappedPoint(event);
+      const position = document.caretPositionFromPoint(point.x, point.y);
+      if (position && content.contains(position.offsetNode)) {
+        return { node: position.offsetNode, offset: position.offset };
+      }
+      const range = document.caretRangeFromPoint?.(point.x, point.y);
+      if (range && content.contains(range.startContainer)) {
+        return { node: range.startContainer, offset: range.startOffset };
+      }
+      return null;
+    };
+    const updateSelection = (event: PointerEvent) => {
+      if (!selectionAnchor) return;
+      const focus = caretAt(event);
+      if (!focus) return;
+      document.getSelection()?.setBaseAndExtent(
+        selectionAnchor.node,
+        selectionAnchor.offset,
+        focus.node,
+        focus.offset,
+      );
+    };
     const updateHover = (event: PointerEvent) => {
       const next = interactiveAt(event);
       if (next === hovered) return;
@@ -234,13 +295,27 @@ void main() {
         draggedRange = target;
         updateRange(target, event);
         source.setPointerCapture(event.pointerId);
+        return;
+      }
+      if (!target) {
+        const caret = caretAt(event);
+        if (!caret) return;
+        event.preventDefault();
+        event.stopPropagation();
+        selectionAnchor = caret;
+        document.getSelection()?.setBaseAndExtent(caret.node, caret.offset, caret.node, caret.offset);
+        source.setPointerCapture(event.pointerId);
       }
     };
     const onPointerMove = (event: PointerEvent) => {
       updateHover(event);
       if (draggedRange) updateRange(draggedRange, event);
+      if (selectionAnchor) updateSelection(event);
     };
-    const onPointerUp = () => { draggedRange = null; };
+    const onPointerUp = () => {
+      draggedRange = null;
+      selectionAnchor = null;
+    };
     const onPointerLeave = () => {
       hovered?.classList.remove("crt-hover");
       hovered = null;
