@@ -1,0 +1,28 @@
+{
+  "name": "html-in-webgl-crt",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "check": "svelte-check --tsconfig ./tsconfig.app.json"
+  },
+  "dependencies": {
+    "svelte": "latest"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@sveltejs/vite-plugin-svelte": "latest",
+    "eslint": "latest",
+    "eslint-plugin-svelte": "latest",
+    "globals": "latest",
+    "prettier": "latest",
+    "svelte-check": "latest",
+    "typescript": "latest",
+    "typescript-eslint": "latest",
+    "vite": "latest"
+  }
+}
